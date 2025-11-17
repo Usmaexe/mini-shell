@@ -11,51 +11,99 @@ const rl = readline.createInterface({
 let code = 0;
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE;
 // const cmdsName = ["echo", "pwd", "exit", "type", "cd", "cat"];
-const cmdsName = ["echo", "pwd", "exit", "type", "cd", "ls"];
+const cmdsName = ["echo", "pwd", "exit", "type", "cd"];
 
 function parseInput(input) {
     return input.match(/(?:[^\s'"]+|['"][^'"]*['"])+/g) || [];
 }
 
 const commands = {
-    ls :
+    ls : async(args) => {
+        return await new Promise((resolve)=>{
+            // here we check if its only ls command with 0 args
+            if(args.length===0){
+                exec(`ls`,(err,stdout)=>{
+                    if(err){
+                        resolve({ errors: ['ls: error executing ls\n'], outputs: [] });
+                    } else {
+                        resolve({ errors: [], outputs: [stdout.split("\n").join("  ")+"\n"] });
+                    }
+                });
+            }
+            // or ls with args
+            else{
+                let errors = [];
+                let outputs = [];
+                let completed = 0;
+                // here we go on each arg(file or directory) and run the ls command
+                for(let arg of args){
+                    exec(`ls ${arg}`,(err,stdout)=>{
+                        // the command will either result in an error, which we then add to the errors array
+                        if(err){
+                            const error = `ls: cannot acess '${arg}': No such file or directory\n`;
+                            errors.push(error);
+                        }
+                        // if the comment run successfully we add it to the outputs array so we can output our array
+                        else{
+                            let output;
+                            if(completed!=0){
+                                outputs.push("\n");
+                            }
+                            if(arg.indexOf('.')!==-1||arg.indexOf('.')!==0){
+                                output = arg + "\n";
+                            }
+                            else{
+                                output = `${arg}:\n` + stdout.split("\n").join("  ") + "\n";
+                            }
+                            outputs.push(output);
+                        }
+                        completed++;
+                        
+                        if(completed === args.length){
+                            resolve({ errors, outputs });
+                        }
+                    });
+                }
+            }
+        })
+    },
+
     cat: async (args) => {
         for (let file of args) {
             try {
-                const content = fs.readFileSync(file, "utf8");
-                process.stdout.write(content);
-            } catch (e) {
-                console.log(`cat: ${file}: No such file`);
+                const result = fs.readFileSync(file, "utf8");
+                return result;
+            } 
+            catch (e) {
+                return [`cat: ${file}: No such file or directory`];
             }
         }
     },
 
     cd: async (args) => {
         if (args.length > 1) {
-            console.log("bash: cd: too many arguments");
-            return;
+            return "bash: cd: too many arguments";
         }
 
         let targetDir = args[0]
             ? args[0].replace(/^~(?=$|[\\/])/, HOME_DIR)
             : HOME_DIR;
-
+    
         try {
             process.chdir(targetDir);
         } catch (err) {
-            console.log(`cd: ${targetDir}: No such file or directory`);
+            return [`cd: ${targetDir}: No such file or directory`];
         }
     },
 
     type: async (args) => {
         if (cmdsName.includes(args[0])) {
-            console.log(`${args[0]} is a shell builtin`);
+            return `${args[0]} is a shell builtin`;
         } else {
-            await new Promise((resolve) => {
+            return await new Promise((resolve) => {
                 exec(`which ${args[0]}`, (err, stdout) => {
-                    if (err) console.error(`${args[0]}: not found`);
-                    else console.log(`${args[0]} is ${stdout.trim()}`);
-                    resolve();
+                    if (err) resolve([`${args[0]}: not found`]);
+                    else resolve(`${args[0]} is ${stdout.trim()}`);
                 });
             });
         }
@@ -76,24 +124,47 @@ const commands = {
 };
 
 function extractRedirection(args) {
-    const index = args.indexOf(">");
+    const index = args.indexOf(">")!==-1
+        ?args.indexOf(">") //if the index exist!=-1 the value will be the place of >
+        :args.indexOf("2>"); // if > is not there check for 2> if its not there put -1
 
-    if (index === -1) return { args, file: null };
-
-    const file = args[index + 1];
-    const cleanArgs = args.slice(0, index);
-
-    return { args: cleanArgs, file };
+    if(index ===-1){
+        //the logic if there is no output redirection 
+        return { args, file: null, isStdout: false};
+    }
+    if (index !== -1) {
+        let isStdout = true;
+        if(args.indexOf(">")===-1){
+            isStdout = false;
+        }
+        // the logic for StandardOutput
+        const file = args[index + 1];
+        const cleanArgs = args.slice(0, index);
+        return { args: cleanArgs, file, isStdout };
+    }
 }
 
-async function runWithRedirection(cmd, args, file) {
+async function runWithRedirection(cmd, args, isStdout, file) {
     let output = "";
-
     if (commands[cmd]) {
-        const result = await commands[cmd](args);
-        if (typeof result === "string") output = result;
+        if(cmd==="ls"){
+            const { errors, outputs } = await commands[cmd](args);
+            if (isStdout) {
+                output = outputs.join("");
+            } else {
+                console.log(outputs.join(""));
+                output = errors.join("");
+            }
+        }
+        else{
+            const result = await commands[cmd](args);
+            if (typeof result === "string") {
+                output = result;
+            } else if (Array.isArray(result) && !isStdout) {
+                output = result.join("\n");
+            }
+        }
     }
-
     fs.writeFileSync(file, output);
 }
 
@@ -112,14 +183,22 @@ rl.on("line", async (input) => {
 
         default:
             if (commands[cmd]) {
-                const { args: cleanArgs, file } = extractRedirection(args);
-                console.log(cleanArgs);
+                const { args: cleanArgs, file, isStdout } = extractRedirection(args);
 
                 if (file) {
-                    await runWithRedirection(cmd, cleanArgs, file);
-                } else {
-                    const result = await commands[cmd](cleanArgs);
-                    if (typeof result === "string") process.stdout.write(result);
+                    await runWithRedirection(cmd, cleanArgs, isStdout, file);
+                } 
+                else {
+                    let result;
+                    if(cmd === "ls"){
+                        let {errors, outputs} = await commands[cmd](cleanArgs);
+                        result = [...errors,...outputs].join('');
+                    }
+                    else{
+                        result = await commands[cmd](cleanArgs);
+                    }
+                    if (typeof result === "string") console.log(result);
+                    if (typeof result === "object") console.error(result[0]);
                 }
             } else {
                 console.log(`${cmd}: command not found`);
