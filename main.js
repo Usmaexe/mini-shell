@@ -47,9 +47,10 @@ const commands = {
                         else{
                             let output;
                             if(completed!=0){
+                                // add new lines between diffrent outputs of commands to imitate the real shell output
                                 outputs.push("\n");
                             }
-                            if(arg.indexOf('.')!==-1||arg.indexOf('.')!==0){
+                            if(arg.indexOf('.')!==-1&&arg.indexOf('.')!==0){
                                 output = arg + "\n";
                             }
                             else{
@@ -125,7 +126,7 @@ const commands = {
 
 function extractRedirection(args) {
     const index = args.indexOf(">")!==-1
-        ?args.indexOf(">") //if the index exist!=-1 the value will be the place of >
+        ?args.indexOf(">") //if the index exist the value will be the index of >
         :args.indexOf("2>"); // if > is not there check for 2> if its not there put -1
 
     if(index ===-1){
@@ -144,18 +145,29 @@ function extractRedirection(args) {
     }
 }
 
+/*
+cmd(String) : the command used (String)
+args(Array) : the arguments of the command might be an empty for some commands
+isStdout(Boolean) : boolean used in case of file streaming indicating that we want to do stdout instead of stderr(bool)
+file(String): the file name
+*/
+
 async function runWithRedirection(cmd, args, isStdout, file) {
     let output = "";
+
     if (commands[cmd]) {
+        // the command ls returns 2 object(arrays)
         if(cmd==="ls"){
             const { errors, outputs } = await commands[cmd](args);
             if (isStdout) {
+                // there is no errors to write to a file
                 output = outputs.join("");
             } else {
                 console.log(outputs.join(""));
                 output = errors.join("");
             }
         }
+        // the other commands returns 1 object(string or a 1-sized array )
         else{
             const result = await commands[cmd](args);
             if (typeof result === "string") {
