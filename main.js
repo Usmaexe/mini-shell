@@ -70,15 +70,18 @@ const commands = {
     },
 
     cat: async (args) => {
+        let outputs = [];
+        let errors = [];
         for (let file of args) {
             try {
                 const result = fs.readFileSync(file, "utf8");
-                return result;
+                outputs.push(result);
             } 
             catch (e) {
-                return [`cat: ${file}: No such file or directory`];
+                errors.push([`cat: ${file}: No such file or directory`]);
             }
         }
+        return {errors, outputs}
     },
 
     cd: async (args) => {
@@ -157,7 +160,7 @@ async function runWithRedirection(cmd, args, isStdout, file) {
 
     if (commands[cmd]) {
         // the command ls returns 2 object(arrays)
-        if(cmd==="ls"){
+        if(cmd==="ls" || cmd ==="cat"){
             const { errors, outputs } = await commands[cmd](args);
             if (isStdout) {
                 // there is no errors to write to a file
@@ -202,15 +205,16 @@ rl.on("line", async (input) => {
                 } 
                 else {
                     let result;
-                    if(cmd === "ls"){
+                    if(cmd === "ls" || cmd ==="cat"){
                         let {errors, outputs} = await commands[cmd](cleanArgs);
-                        result = [...errors,...outputs].join('');
+                        if(errors.length > 0) console.error(errors.join("\n"));
+                        if(outputs.length > 0) console.log(outputs.join(""));
                     }
                     else{
                         result = await commands[cmd](cleanArgs);
+                        if (typeof result === "string") console.log(result);
+                        if (typeof result === "object") console.error(result[0]);
                     }
-                    if (typeof result === "string") console.log(result);
-                    if (typeof result === "object") console.error(result[0]);
                 }
             } else {
                 console.log(`${cmd}: command not found`);
